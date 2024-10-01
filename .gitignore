@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+dist/
+build/
+*.egg
+
+# Virtual envs
+.venv/
+venv/
+env/
+
+# DNA genome databases (generated)
+.dna/genome.db
+*.db
+
+# Real-repo clones used for testing
+tmp/
+
+# macOS
+.DS_Store
+
+# Editor
+.idea/
+.vscode/
+*.swp
