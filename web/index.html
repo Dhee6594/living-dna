@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Living Software DNA — Genome Browser</title>
+<style>
+  :root { --ink:#1a2238; --acc:#0f7b6c; --acc2:#3b4a8c; --grey:#5a6072;
+          --line:#d8dee2; --bg:#f6f8f7; }
+  * { box-sizing:border-box; }
+  body { margin:0; font:14px/1.5 -apple-system,Segoe UI,Helvetica,Arial,sans-serif;
+         color:var(--ink); background:var(--bg); }
+  header { background:var(--ink); color:#fff; padding:12px 20px; display:flex;
+           gap:16px; align-items:center; }
+  header h1 { font-size:16px; margin:0; } header span { color:#9fb0c8; font-size:12px; }
+  main { display:grid; grid-template-columns: 330px 1fr; gap:16px; padding:16px;
+         max-width:1280px; margin:auto; }
+  .card { background:#fff; border:1px solid var(--line); border-radius:10px;
+          padding:14px 16px; margin-bottom:14px; }
+  .card h2 { font-size:13px; margin:0 0 8px; color:var(--acc2);
+             text-transform:uppercase; letter-spacing:.04em; }
+  .svc { padding:8px 10px; border:1px solid var(--line); border-radius:8px;
+         margin:6px 0; cursor:pointer; }
+  .svc:hover { border-color:var(--acc); background:#f0f7f5; }
+  .svc b { color:var(--acc2); } .svc small { color:var(--grey); display:block; }
+  .risk { display:inline-block; padding:1px 8px; border-radius:10px; font-size:11px;
+          background:#fbeaea; color:#8c3b50; margin-left:6px; }
+  .pill { display:inline-block; padding:1px 8px; border-radius:10px; font-size:11px;
+          background:#e7f2f0; color:var(--acc); margin:2px 4px 2px 0; }
+  input,button { font:inherit; padding:8px 10px; border:1px solid var(--line);
+                 border-radius:8px; }
+  button { background:var(--acc); color:#fff; border:0; cursor:pointer; }
+  pre { background:#0f1422; color:#cfe3dd; padding:12px; border-radius:8px;
+        overflow:auto; font-size:12px; max-height:420px; }
+  svg text { font:11px sans-serif; }
+  .ev { color:var(--grey); font-size:12px; border-left:3px solid var(--acc);
+        padding-left:8px; margin:6px 0; }
+  label{ font-size:12px; color:var(--grey);}
+</style>
+</head>
+<body>
+<header><h1>🧬 Living Software DNA</h1><span>Genome Browser — walking skeleton v0</span></header>
+<main>
+  <div>
+    <div class="card"><h2>Ask the genome</h2>
+      <input id="q" style="width:100%" placeholder="why does checkout depend on payments"
+             onkeydown="if(event.key==='Enter')ask()">
+      <div style="margin-top:8px"><button onclick="ask()">Ask</button></div>
+      <div id="answer"></div>
+    </div>
+    <div class="card"><h2>Services</h2><div id="services"></div></div>
+    <div class="card"><h2>Bus-factor heatmap</h2><div id="bus"></div></div>
+  </div>
+  <div>
+    <div class="card"><h2>Genome map
+      <label style="float:right">time travel:
+        <input id="at" type="date" onchange="loadGraph()" style="padding:3px 6px"></label></h2>
+      <svg id="map" width="100%" height="380" viewBox="0 0 800 380"></svg>
+    </div>
+    <div class="card"><h2 id="ptitle">DNA profile</h2><div id="profile">
+      <em style="color:var(--grey)">Select a service.</em></div></div>
+  </div>
+</main>
+<script>
+const J = u => fetch(u).then(r=>r.json());
+
+async function loadServices(){
+  const ps = await J('/api/profiles');
+  document.getElementById('services').innerHTML = ps.map(p=>`
+    <div class="svc" onclick="showProfile('${p.entity}')">
+      <b>${p.entity}</b>${p.risks.length?`<span class="risk">${p.risks.length} risk</span>`:''}
+      <small>born ${p.born||'?'} · ${p.stats.lifetime_commits} commits ·
+      eff. owners ${p.knowledge.effective_owners}</small></div>`).join('');
+}
+
+async function showProfile(name){
+  const p = await J('/api/profile/'+name);
+  document.getElementById('ptitle').textContent = 'DNA profile — '+p.entity;
+  document.getElementById('profile').innerHTML = `
+    <div><b>Born:</b> ${p.born||'?'} — <i>${p.born_msg||''}</i>
+      <span class="pill">${(p.born_commit||'').slice(0,8)}</span></div>
+    <div style="margin-top:6px"><b>Eras:</b> ${p.eras.map(e=>
+      `<span class="pill">${e.index}: ${e.start} → ${e.end}</span>`).join('')}</div>
+    <div style="margin-top:6px"><b>Depends on:</b> ${p.dependencies.map(d=>
+      `<span class="pill">${d.on} (since ${d.since})</span>`).join('')||'—'}</div>
+    <div><b>Dependents:</b> ${p.dependents.join(', ')||'—'}</div>
+    <div style="margin-top:6px"><b>Knowledge:</b> effective owners
+      ${p.knowledge.effective_owners}; ${p.knowledge.top.map(o=>
+      `${o.person} ${(o.weight*100).toFixed(0)}%`).join(' · ')}</div>
+    ${p.risks.map(r=>`<div class="ev">⚠ <b>${r.class}</b> (${r.score}): ${r.note}</div>`).join('')}
+  `;
+}
+
+async function loadGraph(){
+  const at = document.getElementById('at').value;
+  const g = await J('/api/graph'+(at?`?at=${at}`:''));
+  const svg = document.getElementById('map');
+  const n = g.services.length; if(!n){svg.innerHTML='';return;}
+  const pos={};
+  g.services.forEach((s,i)=>{ const a = 2*Math.PI*i/n - Math.PI/2;
+    pos[s.id]=[400+280*Math.cos(a), 190+140*Math.sin(a)]; });
+  svg.innerHTML =
+    g.dependencies.map(e=>{const[a,b]=[pos[e.src],pos[e.dst]];
+      return `<line x1="${a[0]}" y1="${a[1]}" x2="${b[0]}" y2="${b[1]}"
+        stroke="#9aa3b8" stroke-width="1.5" marker-end="url(#ar)"/>`}).join('') +
+    `<defs><marker id="ar" markerWidth="8" markerHeight="8" refX="22" refY="3"
+       orient="auto"><path d="M0,0 L6,3 L0,6 z" fill="#9aa3b8"/></marker></defs>` +
+    g.services.map(s=>{const[x,y]=pos[s.id];
+      return `<g onclick="showProfile('${s.name}')" style="cursor:pointer">
+        <circle cx="${x}" cy="${y}" r="26" fill="#e7f2f0" stroke="#0f7b6c" stroke-width="2"/>
+        <text x="${x}" y="${y+3}" text-anchor="middle" fill="#1a2238">${s.name}</text>
+        <text x="${x}" y="${y+40}" text-anchor="middle" fill="#5a6072">${s.born||''}</text></g>`}).join('');
+}
+
+async function loadBus(){
+  const b = await J('/api/busfactor');
+  document.getElementById('bus').innerHTML = b.map(p=>`
+    <div class="svc" onclick="askText('what happens if ${p.person} leaves')">
+      <b>${p.person}</b>${p.critical_services?`<span class="risk">
+      ${p.critical_services} critical</span>`:''}
+      <small>${p.services_impacted} services impacted if they leave</small></div>`).join('');
+}
+
+function askText(t){ document.getElementById('q').value=t; ask(); }
+async function ask(){
+  const q = document.getElementById('q').value;
+  const a = await J('/api/ask?q='+encodeURIComponent(q));
+  document.getElementById('answer').innerHTML =
+    `<div style="margin-top:10px"><b>${a.answer}</b></div>` +
+    (a.evidence||[]).map(e=>`<div class="ev">${e}</div>`).join('') +
+    (a.detail?`<pre>${JSON.stringify(a.detail,null,1)}</pre>`:'');
+}
+
+loadServices(); loadGraph(); loadBus();
+</script>
+</body>
+</html>
