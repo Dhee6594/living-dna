@@ -255,6 +255,15 @@ def history(genome, repo_root: Path, services: dict, repo_name: str,
                                      0 if add == "-" else int(add),
                                      0 if dele == "-" else int(dele)))
 
+    # Identity resolution v0: collapse duplicate git identities before any
+    # knowledge attribution (see dna/identity.py for rules).
+    from .identity import resolve_identities
+    aliases = resolve_identities(commits, repo_root)
+    for c in commits:
+        hit = aliases.get(c["email"].lower())
+        if hit:
+            c["email"], c["author"] = hit[0], hit[1]
+
     svc_dirs = sorted(services.items(), key=lambda kv: -len(kv[1]))
 
     def svc_of(path):

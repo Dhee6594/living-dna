@@ -138,9 +138,86 @@ def test_rename_brace_empty_segment():
           f"new={new} old={old}")
 
 
+def test_identity_resolution():
+    """Duplicate git identities collapse per dna/identity.py rules."""
+    import json
+    import tempfile
+    from pathlib import Path
+    from dna.identity import resolve_identities
+
+    def C(author, email, bot=False):
+        return {"author": author, "email": email, "bot": bot}
+
+    # Rule A: exact multi-token name, different emails -> merged
+    commits = [C("Lena Kovacs", "lena@acme.io")] * 3 + \
+              [C("lena kovacs", "lena.kovacs@gmail.com")]
+    m = resolve_identities(commits)
+    check("identity: multi-token name merge",
+          m.get("lena.kovacs@gmail.com", ("",))[0] == "lena@acme.io", str(m))
+
+    # Canonical = identity with the most commits
+    check("identity: canonical is majority identity",
+          "lena@acme.io" not in m, str(m))
+
+    # Single-token names are too ambiguous -> never merged on name alone
+    commits = [C("sai", "a@x.com"), C("sai", "b@y.com")]
+    check("identity: single-token names NOT merged",
+          resolve_identities(commits) == {}, str(resolve_identities(commits)))
+
+    # Rule B: GitHub noreply matches email local-part
+    commits = [C("Lena Kovacs", "lena@acme.io")] * 2 + \
+              [C("lenak", "12345+lena@users.noreply.github.com")]
+    m = resolve_identities(commits)
+    check("identity: github-noreply local-part merge",
+          m.get("12345+lena@users.noreply.github.com", ("",))[0] == "lena@acme.io",
+          str(m))
+
+    # Distinct people never merged
+    commits = [C("Jin Park", "jin@acme.io"), C("Lena Kovacs", "lena@acme.io")]
+    check("identity: distinct people untouched",
+          resolve_identities(commits) == {}, "")
+
+    # Bots never participate
+    commits = [C("Lena Kovacs", "lena@acme.io"),
+               C("Lena Kovacs", "dep@bots.io", bot=True)]
+    check("identity: bots never merged",
+          resolve_identities(commits) == {}, "")
+
+    # Explicit override file always wins
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        (root / ".dna").mkdir()
+        (root / ".dna" / "identities.json").write_text(json.dumps(
+            {"aliases": {"apple@mac.local": "vs94@gmail.com"}}))
+        commits = [C("Sai Dheeraj", "vs94@gmail.com")] * 2 + \
+                  [C("Sai", "apple@mac.local")]
+        m = resolve_identities(commits, root)
+        check("identity: override file merges unrelated names",
+              m.get("apple@mac.local", ("",))[0] == "vs94@gmail.com", str(m))
+
+
+def test_diff_now_no_crash():
+    """dna diff with 'now' endpoints must not crash (9e12 sentinel regression)."""
+    import tempfile
+    from pathlib import Path
+    from dna.db import Genome
+    from dna import genome_ops as ops
+
+    with tempfile.TemporaryDirectory() as tmp:
+        g = Genome(str(Path(tmp) / "d.db"))
+        g.upsert_node("svc:a", "Service", "a", valid_from=1577836800.0)  # 2020-01-01
+        g.commit()
+        d = ops.diff(g, 1546300800.0, None)          # --from 2019 --to now
+        check("diff: --to now does not crash",
+              any("svc:a" in str(s) for s in d["services_added"]), str(d))
+        d2 = ops.diff(g, None, None)                 # --from now --to now
+        check("diff: now->now is empty and sane",
+              d2["services_added"] == [] and d2["services_removed"] == [], str(d2))
+
+
 def test_merge_commit_dedup():
     """Merge commits that list the same path twice must not double-count churn."""
-    import tempfile, subprocess, sys, json
+    import tempfile, subprocess
     from pathlib import Path
     from dna.db import Genome
     from dna.ingest import ingest_repo
@@ -250,6 +327,8 @@ if __name__ == "__main__":
     main()
     # Run standalone unit tests
     test_rename_brace_empty_segment()
+    test_identity_resolution()
+    test_diff_now_no_crash()
     test_merge_commit_dedup()
     test_bot_author_extended()
     test_export()

@@ -54,8 +54,8 @@ def make_handler(db_path):
                 elif p == "/api/graph":
                     self._json(ops.graph_at(g, parse_when(qs.get("at", [None])[0])))
                 elif p == "/api/diff":
-                    self._json(ops.diff(g, parse_when(qs["from"][0]),
-                                        parse_when(qs["to"][0]) or 9e12))
+                    self._json(ops.diff(g, parse_when(qs.get("from", ["now"])[0]),
+                                        parse_when(qs.get("to", ["now"])[0])))
                 elif p == "/api/busfactor":
                     who = qs.get("person", [None])[0]
                     if who:
@@ -87,7 +87,9 @@ def make_handler(db_path):
     return Handler
 
 
-def serve(db_path=".dna/genome.db", port=8077):
-    httpd = ThreadingHTTPServer(("0.0.0.0", port), make_handler(db_path))
-    print(f"Genome Browser: http://localhost:{port}  (db: {db_path})")
+def serve(db_path=".dna/genome.db", port=8077, host="127.0.0.1"):
+    # Default to loopback: the genome contains person-level knowledge data and
+    # this v0 server has no auth. Use --host 0.0.0.0 to expose deliberately.
+    httpd = ThreadingHTTPServer((host, port), make_handler(db_path))
+    print(f"Genome Browser: http://{host}:{port}  (db: {db_path})")
     httpd.serve_forever()

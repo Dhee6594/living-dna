@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "living-dna"
+version = "0.1.0"
+description = "Living Software DNA — bitemporal software genome: who knows what, what breaks, and why it was built this way."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "Proprietary" }  # deliberate: CE/EE license split is an open founder decision (ENTERPRISE-ROADMAP §8.1)
+authors = [{ name = "Sai Dheeraj", email = "vemireddysaidheeraj94@gmail.com" }]
+dependencies = []  # pure stdlib by design
+
+[project.scripts]
+dna = "dna.cli:main"
+
+[tool.setuptools]
+packages = ["dna"]
+
+[tool.ruff]
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E9", "F", "B"]

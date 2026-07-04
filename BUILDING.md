@@ -4,7 +4,7 @@ Solo full-time pace. Each step ends in something demoable. Blueprint references 
 
 ## Week 0 — you are here ✅
 Skeleton runs end-to-end: ingest → graph → profiles → bus factor → time travel → ask → UI.
-22-check test suite green (`python3 -m tests.test_skeleton`).
+61-check test suite green (`python3 -m tests.test_skeleton`).
 
 ## Weeks 1–2 — make it true on real repos
 1. Run `dna ingest` on 5 real repos you know well (yours + big OSS like `fastapi`, `flask`).

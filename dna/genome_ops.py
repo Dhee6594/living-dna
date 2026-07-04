@@ -2,7 +2,6 @@
 import datetime as dt
 import re
 import time
-from collections import defaultdict
 
 EXPORT_SCHEMA_VERSION = "1.0"
 
@@ -65,7 +64,8 @@ def export_genome(g) -> dict:
 
     return {
         "schema_version": EXPORT_SCHEMA_VERSION,
-        "exported_at": dt.datetime.utcnow().isoformat() + "Z",
+        "exported_at": dt.datetime.now(dt.timezone.utc)
+                         .isoformat().replace("+00:00", "Z"),
         "stats": {
             "nodes": len(raw_nodes),
             "edges": len(raw_edges),
@@ -80,7 +80,8 @@ def export_genome(g) -> dict:
 
 
 def _date(ts):
-    return dt.datetime.utcfromtimestamp(ts).strftime("%Y-%m-%d") if ts else None
+    return (dt.datetime.fromtimestamp(ts, dt.timezone.utc).strftime("%Y-%m-%d")
+            if ts else None)
 
 
 # ------------------------------------------------------------------ profiles
@@ -224,6 +225,12 @@ def graph_at(g, at=None):
 
 
 def diff(g, t1, t2):
+    # None means "now" (parse_when('now') -> None). Normalize to a real
+    # timestamp so date formatting and cause() windows never see None or a
+    # far-future sentinel (9e12 used to crash _date with year-out-of-range).
+    now = time.time()
+    t1 = now if t1 is None else t1
+    t2 = now if t2 is None else t2
     g1, g2 = graph_at(g, t1), graph_at(g, t2)
     s1 = {n["id"] for n in g1["services"]}; s2 = {n["id"] for n in g2["services"]}
     e1 = {(e["src"], e["dst"]) for e in g1["dependencies"]}
@@ -344,7 +351,7 @@ def ask(g, question: str):
         crit = ", ".join(c["service"] for c in sim["critical"]) or "none"
         return {"answer": f"If {sim['person']} leaves: {sim['services_impacted']} services "
                           f"impacted, critical: {crit}.",
-                "evidence": [f"bus-factor simulation over KNOWS edges"],
+                "evidence": ["bus-factor simulation over KNOWS edges"],
                 "detail": sim}
 
     m = re.search(r"why (?:does|do) ([\w-]+) exist", q)

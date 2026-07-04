@@ -39,6 +39,8 @@ def main(argv=None):
     s.add_argument("--out", default="", metavar="FILE",
                    help="write JSON to FILE instead of stdout")
     s = sub.add_parser("serve"); s.add_argument("--port", type=int, default=8077)
+    s.add_argument("--host", default="127.0.0.1",
+                   help="bind address (default loopback; 0.0.0.0 to expose)")
     sub.add_parser("report")
 
     a = ap.parse_args(argv)
@@ -71,7 +73,7 @@ def main(argv=None):
     elif a.cmd == "timetravel":
         out = ops.graph_at(g, parse_when(a.at))
     elif a.cmd == "diff":
-        out = ops.diff(g, parse_when(a.t1), parse_when(a.t2) or 9e12)
+        out = ops.diff(g, parse_when(a.t1), parse_when(a.t2))
     elif a.cmd == "mine":
         from . import ai
         if not ai.available():
@@ -99,7 +101,7 @@ def main(argv=None):
     elif a.cmd == "report":
         out = ops.quality_report(g)
     elif a.cmd == "serve":
-        serve(a.db, a.port); return
+        serve(a.db, a.port, a.host); return
 
     json.dump(out, sys.stdout, indent=1)
     print()

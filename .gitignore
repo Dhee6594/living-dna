@@ -26,3 +26,6 @@ tmp/
 .idea/
 .vscode/
 *.swp
+
+# Generated fixture copies (tests build their own in a tempdir)
+fixtures/acme-shop/
