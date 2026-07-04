@@ -79,3 +79,18 @@ tests/             end-to-end test (17 checks): python3 -m tests.test_skeleton
 
 See [BUILDING.md](BUILDING.md) — the step-by-step path from this skeleton to the
 Phase-1 MVP in the blueprint (`living-software-dna/14-implementation-roadmap.md`).
+
+## Contributing & governance
+
+Contributions welcome — see [CONTRIBUTING.md](CONTRIBUTING.md) for the dev setup, the
+gitflow branching model (branch off `develop`), and the DCO sign-off. Project governance
+and the RFC/ADR process live in [GOVERNANCE.md](GOVERNANCE.md); security reporting in
+[SECURITY.md](SECURITY.md).
+
+## License
+
+Source-available under the **[Business Source License 1.1](LICENSE)**: the source is public
+and free to read, modify, and use non-production (and for any non-competing production use —
+see the Additional Use Grant). Each version converts to **Apache-2.0** on its Change Date
+(2029-07-04 for 0.1.0). For commercial/hosted use that competes with Living DNA, contact the
+licensor.

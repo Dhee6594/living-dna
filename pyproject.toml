@@ -8,7 +8,7 @@ version = "0.1.0"
 description = "Living Software DNA — bitemporal software genome: who knows what, what breaks, and why it was built this way."
 readme = "README.md"
 requires-python = ">=3.10"
-license = { text = "Proprietary" }  # deliberate: CE/EE license split is an open founder decision (ENTERPRISE-ROADMAP §8.1)
+license = { text = "BUSL-1.1" }  # source-available; converts to Apache-2.0 on 2029-07-04 (see LICENSE)
 authors = [{ name = "Sai Dheeraj", email = "vemireddysaidheeraj94@gmail.com" }]
 dependencies = []  # pure stdlib by design
 

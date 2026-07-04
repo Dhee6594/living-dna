@@ -7,6 +7,8 @@ All notable changes to this project are documented here. The format is based on
 ## [Unreleased]
 
 ### Added
+- **License:** source-available under the Business Source License 1.1 (`LICENSE`), converting
+  to Apache-2.0 on 2029-07-04. Recorded in ADR-0004. `pyproject.toml` updated to `BUSL-1.1`.
 - Enterprise repository scaffolding: `CONTRIBUTING.md`, `CODE_OF_CONDUCT.md`,
   `SECURITY.md`, `GOVERNANCE.md`, this changelog.
 - `.github/` — CI workflow (engine test matrix + web build), issue forms, PR template,

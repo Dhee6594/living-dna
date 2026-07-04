@@ -37,9 +37,10 @@ with at least two non-employee maintainers and a versioned public roadmap.
 
 These are deliberately **undecided** and should not be resolved unilaterally in a PR:
 
-1. **License / edition split.** `pyproject.toml` currently declares `Proprietary` on
-   purpose — the Community-Edition license (the blueprint suggests Apache-2.0) is a founder
-   decision that shapes everything downstream. No `LICENSE` file is committed until it's made.
+1. ~~**License / edition split.**~~ **Decided** (2026-07-04): source-available under the
+   **Business Source License 1.1** (`LICENSE`), converting to Apache-2.0 on 2029-07-04. See
+   [ADR-0004](docs/architecture/adr/0004-license-busl-1.1.md). The CE/EE *edition* split
+   remains to be designed as enterprise features land.
 2. **Cloud-first vs. self-host-first** go-to-market ordering.
 3. **Smart-model routing** policy for the AI miner (cost vs. reasoning quality).
 
