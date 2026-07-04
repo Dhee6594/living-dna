@@ -71,6 +71,28 @@ def make_handler(db_path):
                 elif p == "/api/people":
                     self._json([{"id": n["id"], "name": n["name"]}
                                 for n in g.nodes(kind="Person")])
+                elif p == "/api/report":
+                    self._json(ops.quality_report(g))
+                elif p == "/api/insights":
+                    from . import insights as ins
+                    self._json(ins.insights(g))
+                elif p == "/api/search":
+                    q = qs.get("q", [""])[0].lower()
+                    if not q:
+                        self._json([])
+                    else:
+                        hits = [{"id": n["id"], "kind": n["kind"],
+                                 "name": n["name"]}
+                                for n in g.nodes()
+                                if q in n["name"].lower() or q in n["id"].lower()]
+                        self._json(hits[:50])
+                elif p == "/api/events":
+                    svc = qs.get("service", [None])[0]
+                    kind = qs.get("kind", ["code."])[0]
+                    limit = int(qs.get("limit", ["200"])[0])
+                    evs = g.events_q(kind=kind,
+                                     subject=f"svc:{svc}" if svc else None)
+                    self._json(evs[-limit:])
                 elif p == "/api/decisions":
                     self._json([{"id": n["id"], "statement": n["props"].get("statement"),
                                  "rationale": n["props"].get("rationale"),

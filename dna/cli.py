@@ -5,9 +5,10 @@
   dna ask "<question>" [--deep]           archaeology Q&A (graph-first; --deep uses LLM)
   dna busfactor [--person NAME]           org heatmap or departure simulation
   dna timetravel --at YYYY-MM-DD          dependency graph at a date
-  dna diff --from YYYY-MM-DD --to YYYY-MM-DD
+  dna diff --from YYYY-MM-DD [--to YYYY-MM-DD]   (--to defaults to now)
   dna mine <service> [--era N]            LLM decision mining over an era (needs API key)
   dna export [--out FILE]                 JSON dump of all nodes/edges/events (open schema)
+  dna insights                            engineering-intelligence report (graph-only)
   dna serve [--port 8077]                 Genome Browser web UI + JSON API
 """
 import argparse
@@ -40,8 +41,10 @@ def main(argv=None):
                    help="write JSON to FILE instead of stdout")
     s = sub.add_parser("serve"); s.add_argument("--port", type=int, default=8077)
     s.add_argument("--host", default="127.0.0.1",
-                   help="bind address (default loopback; 0.0.0.0 to expose)")
+                   help="bind address (default: %(default)s — loopback only; "
+                        "use 0.0.0.0 to expose deliberately)")
     sub.add_parser("report")
+    sub.add_parser("insights")
 
     a = ap.parse_args(argv)
     g = Genome(a.db)
@@ -100,6 +103,9 @@ def main(argv=None):
             return
     elif a.cmd == "report":
         out = ops.quality_report(g)
+    elif a.cmd == "insights":
+        from . import insights as ins
+        out = ins.insights(g)
     elif a.cmd == "serve":
         serve(a.db, a.port, a.host); return
 
