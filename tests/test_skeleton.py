@@ -215,6 +215,232 @@ def test_diff_now_no_crash():
               d2["services_added"] == [] and d2["services_removed"] == [], str(d2))
 
 
+def test_insight_engine():
+    """Insight engine: cycles, hidden coupling, gini, recommendations ranking,
+    end-to-end on the fixture genome (Phase 3 Task 2)."""
+    import tempfile
+    from pathlib import Path
+    from dna.db import Genome
+    from dna.ingest import ingest_repo
+    from dna import genome_ops as ops
+    from dna.insights import find_cycles, hidden_dependencies, _gini, insights
+
+    # Unit: cycle detection
+    adj = {"svc:a": {"svc:b"}, "svc:b": {"svc:c"}, "svc:c": {"svc:a"},
+           "svc:x": {"svc:y"}}
+    cyc = find_cycles(adj)
+    check("insights: 3-cycle detected", any(set(c) >= {"a", "b", "c"} for c in cyc),
+          str(cyc))
+    check("insights: acyclic pair not flagged",
+          not any("x" in c or "y" in c for c in cyc), str(cyc))
+    check("insights: no false cycles on empty graph", find_cycles({}) == [], "")
+
+    # Unit: gini
+    check("insights: gini even distribution ~0", _gini([1, 1, 1, 1]) < 0.05,
+          str(_gini([1, 1, 1, 1])))
+    check("insights: gini concentrated -> high", _gini([0, 0, 0, 10]) > 0.7,
+          str(_gini([0, 0, 0, 10])))
+
+    # Unit: hidden dependency = co-change without declared edge
+    with tempfile.TemporaryDirectory() as tmp:
+        g = Genome(str(Path(tmp) / "h.db"))
+        for s in ("a", "b", "c"):
+            g.upsert_node(f"svc:{s}", "Service", s)
+        g.upsert_edge("DEPENDS_ON", "svc:a", "svc:b")
+        g.upsert_edge("CO_CHANGES", "svc:a", "svc:b", props={"count": 9})
+        g.upsert_edge("CO_CHANGES", "svc:a", "svc:c", props={"count": 5})
+        g.commit()
+        hid = hidden_dependencies(g)
+        check("insights: declared co-change not hidden",
+              not any({h["a"], h["b"]} == {"a", "b"} for h in hid), str(hid))
+        check("insights: undeclared co-change IS hidden",
+              any({h["a"], h["b"]} == {"a", "c"} for h in hid), str(hid))
+
+    # End-to-end on fixture
+    import subprocess, sys
+    with tempfile.TemporaryDirectory() as tmp:
+        fx = Path(tmp) / "acme-shop"
+        subprocess.run([sys.executable, str(ROOT / "fixtures/make_fixture.py"),
+                        str(fx)], check=True)
+        g = Genome(str(Path(tmp) / "i.db"))
+        ingest_repo(g, fx)
+        ops.materialize_profiles(g)
+        doc = insights(g)
+        for key in ("overview", "engineering_health", "architecture",
+                    "risk_intelligence", "knowledge_intelligence",
+                    "recommendations", "executive"):
+            check(f"insights: section '{key}' present", key in doc, "")
+        check("insights: scores in 0-100",
+              all(0 <= doc["overview"][k] <= 100 for k in
+                  ("complexity_score", "maintainability_score", "maturity_score")),
+              str(doc["overview"]))
+        recs = doc["recommendations"]
+        check("insights: recommendations ranked by score",
+              all(recs[i]["score"] >= recs[i+1]["score"]
+                  for i in range(len(recs) - 1)), str([r["score"] for r in recs]))
+        check("insights: recs carry impact/risk/confidence/effort",
+              all(all(k in r for k in ("impact", "risk", "confidence", "effort"))
+                  for r in recs), "")
+        check("insights: all four executive audiences",
+              set(doc["executive"]) == {"cto", "engineering_manager",
+                                        "staff_engineer", "platform_team"},
+              str(list(doc["executive"])))
+        check("insights: silo detected on fixture (Lena/payments)",
+              any(s["service"] == "payments"
+                  for s in doc["knowledge_intelligence"]["knowledge_silos"]),
+              str(doc["knowledge_intelligence"]["knowledge_silos"]))
+
+
+def test_service_detection_beyond_manifests():
+    """Tiered discovery: entrypoints, compose, content dirs; no false positives
+    from tests/docs/package-internals (Phase 2 Task 1)."""
+    import tempfile
+    from pathlib import Path
+    from dna.ingest import discover_services
+
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp) / "polyrepo"
+
+        # entrypoint tier: Dockerfile-only dir, *_server.py dir
+        (root / "backend").mkdir(parents=True)
+        (root / "backend" / "Dockerfile").write_text("FROM python:3.12\n")
+        (root / "ner-server").mkdir()
+        (root / "ner-server" / "ner_server.py").write_text("print('serve')\n")
+        # excluded: tests/ with an entrypoint name
+        (root / "tests").mkdir()
+        (root / "tests" / "main.py").write_text("pass\n")
+        # excluded: module inside a python package tree
+        (root / "pkg").mkdir()
+        (root / "pkg" / "__init__.py").write_text("")
+        (root / "pkg" / "sub").mkdir()
+        (root / "pkg" / "sub" / "app.py").write_text("pass\n")
+        # compose tier
+        (root / "worker").mkdir()
+        (root / "worker" / "run.sh").write_text("#!/bin/sh\n")
+        (root / "docker-compose.yml").write_text(
+            "services:\n  worker:\n    build: ./worker\n")
+
+        s, m = discover_services(root, with_methods=True)
+        check("detect: Dockerfile-only dir found",
+              m.get("backend") == "entrypoint", str(s))
+        check("detect: *_server.py dir found",
+              m.get("ner-server") == "entrypoint", str(s))
+        check("detect: compose build context found",
+              m.get("worker") == "compose", str(s))
+        check("detect: tests/ never a service", "tests" not in s, str(s))
+        check("detect: package-internal dir never a service",
+              "sub" not in s and "pkg" not in s, str(s))
+
+    # content tier: repo with no code markers at all -> top-level content dirs
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp) / "content-repo"
+        for d in ("modes", "reports"):
+            (root / d).mkdir(parents=True)
+            for i in range(3):
+                (root / d / f"f{i}.md").write_text("x\n")
+        (root / "thin").mkdir()
+        (root / "thin" / "one.md").write_text("x\n")
+        s, m = discover_services(root, with_methods=True)
+        check("detect: content dirs become genes",
+              m.get("modes") == "content" and m.get("reports") == "content", str(s))
+        check("detect: thin dirs (<3 files) skipped", "thin" not in s, str(s))
+
+    # manifest repo: content tier must NOT run; root '.' name never empty
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp) / "lib"
+        root.mkdir()
+        (root / "pyproject.toml").write_text("[project]\nname='lib'\n")
+        (root / "notes").mkdir()
+        for i in range(4):
+            (root / "notes" / f"n{i}.md").write_text("x\n")
+        s, m = discover_services(root, with_methods=True)
+        check("detect: manifest repo skips content tier",
+              list(s) == ["lib"] and m["lib"] == "manifest", str(s))
+        check("detect: root name never empty (Path('.') bug)",
+              all(n for n in s), str(s))
+
+
+def test_server_bind_security():
+    """Server defaults to loopback (no-auth genome must not hit the LAN);
+    explicit host override remains available (regression for Phase 0 finding)."""
+    import inspect
+    import subprocess
+    import sys
+    import threading
+    import urllib.request
+    from http.server import ThreadingHTTPServer
+    from dna.server import serve, make_handler
+
+    # 1. Default bind is loopback
+    default_host = inspect.signature(serve).parameters["host"].default
+    check("server: default host is 127.0.0.1", default_host == "127.0.0.1",
+          default_host)
+
+    # 2. CLI exposes --host with loopback default
+    out = subprocess.run([sys.executable, "-m", "dna.cli", "serve", "--help"],
+                         capture_output=True, text=True, cwd=str(ROOT))
+    check("server: CLI has --host flag", "--host" in out.stdout, out.stdout[-200:])
+    check("server: CLI --help documents loopback default",
+          "127.0.0.1" in out.stdout, out.stdout[-200:])
+
+    # 2b. New API endpoints (report/search/events) serve from existing ops
+    import json as _json
+    import tempfile as _tf
+    from pathlib import Path as _P
+    from dna.db import Genome as _G
+    from dna.ingest import ingest_repo as _ir
+    from dna import genome_ops as _ops
+    with _tf.TemporaryDirectory() as tmp2:
+        fx = _P(tmp2) / "acme-shop"
+        subprocess.run([sys.executable, str(ROOT / "fixtures/make_fixture.py"),
+                        str(fx)], check=True)
+        db2 = str(_P(tmp2) / "api.db")
+        g2 = _G(db2)
+        _ir(g2, fx)
+        _ops.materialize_profiles(g2)
+        g2.conn.close()
+        httpd = ThreadingHTTPServer(("127.0.0.1", 0), make_handler(db2))
+        port = httpd.server_address[1]
+        threading.Thread(target=httpd.serve_forever, daemon=True).start()
+        try:
+            def _get(path):
+                with urllib.request.urlopen(
+                        f"http://127.0.0.1:{port}{path}", timeout=5) as r:
+                    return _json.loads(r.read())
+            rep = _get("/api/report")
+            check("api: /api/report serves quality report",
+                  rep.get("services", 0) >= 1, str(rep)[:80])
+            hits = _get("/api/search?q=pay")
+            check("api: /api/search finds payments",
+                  any("payments" in h["id"] for h in hits), str(hits)[:80])
+            evs = _get("/api/events?service=payments&limit=5")
+            check("api: /api/events returns commit events",
+                  0 < len(evs) <= 5 and evs[0]["kind"] == "code.commit",
+                  f"{len(evs)} events")
+        finally:
+            httpd.shutdown()
+
+    # 3. Functional: loopback bind serves the API; override host is honoured
+    import tempfile
+    from pathlib import Path
+    from dna.db import Genome
+    with tempfile.TemporaryDirectory() as tmp:
+        db = str(Path(tmp) / "s.db")
+        Genome(db).commit()  # create empty schema
+        for host in ("127.0.0.1", "0.0.0.0"):
+            httpd = ThreadingHTTPServer((host, 0), make_handler(db))
+            port = httpd.server_address[1]
+            t = threading.Thread(target=httpd.serve_forever, daemon=True)
+            t.start()
+            try:
+                with urllib.request.urlopen(
+                        f"http://127.0.0.1:{port}/api/people", timeout=5) as r:
+                    ok = r.status == 200
+            finally:
+                httpd.shutdown()
+            check(f"server: bind {host} serves /api/people", ok, f"port {port}")
+
+
 def test_merge_commit_dedup():
     """Merge commits that list the same path twice must not double-count churn."""
     import tempfile, subprocess
@@ -329,6 +555,9 @@ if __name__ == "__main__":
     test_rename_brace_empty_segment()
     test_identity_resolution()
     test_diff_now_no_crash()
+    test_insight_engine()
+    test_service_detection_beyond_manifests()
+    test_server_bind_security()
     test_merge_commit_dedup()
     test_bot_author_extended()
     test_export()
