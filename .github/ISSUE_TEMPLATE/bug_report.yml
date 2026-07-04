@@ -1,0 +1,54 @@
+name: Bug report
+description: Something in the engine, CLI, API, or web UI behaves incorrectly.
+labels: ["bug", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for filing a bug. The genome is only as trustworthy as the reports
+        against it — please include enough detail to reproduce.
+  - type: input
+    id: version
+    attributes:
+      label: Version / commit
+      description: Output of `dna --version` or the commit SHA you are on.
+      placeholder: "0.1.0 / 1d3e505"
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - ingest (write path)
+        - genome_ops (read path — profile/ask/busfactor/timetravel/diff)
+        - insights engine
+        - server / JSON API
+        - web UI (webapp)
+        - CLI
+        - AI layer
+        - other
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      description: Exact commands. If it depends on a repo's history, describe its shape.
+      placeholder: |
+        1. dna ingest /path/to/repo
+        2. dna busfactor person:...
+        3. ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected vs actual
+    validations:
+      required: true
+  - type: textarea
+    id: env
+    attributes:
+      label: Environment
+      description: OS, Python version, Node version (if web UI).

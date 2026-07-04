@@ -1,0 +1,17 @@
+# Code owners — auto-requested for review on matching paths.
+# Order matters: the last matching pattern wins.
+
+# Default owner for everything.
+*                       @Dhee6594
+
+# The bitemporal store is the load-bearing seam (must stay dependency-free).
+/dna/db.py              @Dhee6594
+
+# Architecture decisions and design laws.
+/ARCHITECTURE.md        @Dhee6594
+/docs/architecture/     @Dhee6594
+
+# CI, governance, and repo policy.
+/.github/               @Dhee6594
+/GOVERNANCE.md          @Dhee6594
+/SECURITY.md            @Dhee6594

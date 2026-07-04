@@ -1,0 +1,36 @@
+name: Feature request
+description: Propose a capability, connector, or improvement.
+labels: ["enhancement", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Larger or cross-cutting changes (new node/edge kinds, new connectors, ontology
+        changes) should start as an RFC — see GOVERNANCE.md. Small features can go here.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What can't you do today? Who feels the pain?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+    validations:
+      required: true
+  - type: dropdown
+    id: stage
+    attributes:
+      label: Roadmap stage (see ENTERPRISE-ROADMAP)
+      options:
+        - "Stage 0 — ingest correctness"
+        - "Stage 1 — MCP server / GitHub PR connector"
+        - "Stage 2 — connector fusion / risk engine"
+        - "Stage 3 — enterprise (SSO/RBAC/self-host)"
+        - "unsure"
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
