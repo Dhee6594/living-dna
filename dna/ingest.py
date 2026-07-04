@@ -25,6 +25,25 @@ SKIP_DIRS = frozenset({".git", "node_modules", "vendor", "dist", "build",
                        "tmp", ".tox", ".venv", "venv", "env", "__pycache__",
                        ".eggs", ".mypy_cache", ".pytest_cache"})
 
+# --- Detection beyond manifests (Phase 2) ---------------------------------
+# Dirs that hold code but are not services; applied to ALL detectors so
+# examples/tutorial dirs with manifests stop registering as services.
+NON_SERVICE_DIRS = frozenset({"tests", "test", "testing", "docs", "doc",
+                              "docs_src", "examples", "example", "samples",
+                              "sample", "benchmarks", "scripts", "fixtures",
+                              ".github"})
+# A dir containing one of these is a service candidate even with no manifest
+# (container/proc definitions and language entry-point conventions).
+ENTRYPOINT_FILES = frozenset({"main.py", "app.py", "manage.py", "__main__.py",
+                              "wsgi.py", "asgi.py", "main.go", "main.rs",
+                              "server.js", "app.js", "Dockerfile", "Procfile"})
+ENTRYPOINT_GLOBS = ("server.py", "*_server.py")   # foo_server.py style
+COMPOSE_FILES = ("docker-compose.yml", "docker-compose.yaml",
+                 "compose.yml", "compose.yaml")
+COMPOSE_CONTEXT = re.compile(r"(?:build|context):\s*\.?/?([\w./-]+)")
+MAX_ENTRYPOINT_DEPTH = 3      # how deep entry-point scanning goes
+CONTENT_MIN_FILES = 3         # content-dir fallback threshold
+
 PY_IMPORT = re.compile(r"^\s*(?:from|import)\s+([a-zA-Z_][\w.]*)", re.M)
 JS_IMPORT = re.compile(r"""(?:from\s+|require\()\s*['"]([^'"]+)['"]""")
 
@@ -76,17 +95,48 @@ def _git(repo, *args):
 
 
 # --------------------------------------------------------------- Pass 1: census
-def discover_services(repo_root: Path):
-    """Return {service_name: relative_dir} candidates."""
-    repo_root = Path(repo_root)
-    services = {}
+def discover_services(repo_root: Path, with_methods: bool = False):
+    """Return {service_name: relative_dir} candidates.
 
-    # Build set of sub-repo roots (dirs with their own .git); we skip these
-    # so embedded fixture repos / cloned sub-projects don't pollute discovery.
-    sub_repos = set()
-    for git_dir in repo_root.rglob(".git"):
-        if git_dir.parent != repo_root:
-            sub_repos.add(git_dir.parent)
+    Tiered detectors, most-trusted first (Phase 2: beyond manifests):
+      1. manifest   — package.json / pyproject.toml / go.mod / ... (original)
+      2. layout     — children of services/ apps/ packages/       (original)
+      3. entrypoint — Dockerfile, Procfile, main.py, *_server.py, main.go ...
+      4. compose    — docker-compose build/context targets
+      5. content    — top-level content dirs, ONLY if nothing else matched
+                      (content repos: modes/, reports/, ... become genes)
+      fallback      — whole repo as one service
+
+    Later tiers never override or nest inside earlier findings, and
+    NON_SERVICE_DIRS (tests/docs/examples/...) are excluded everywhere —
+    which also stops example dirs with manifests registering as services.
+
+    with_methods=True additionally returns {service_name: detector_tier}.
+    """
+    repo_root = Path(repo_root).resolve()   # resolve: Path('.').name == '' bug
+    services, methods = {}, {}
+
+    # SINGLE walk pass collecting manifests, entry-points, and sub-repo roots.
+    # (Was 21 rglob passes; rglob also cannot prune node_modules/vendor —
+    # on large real repos census went from minutes to seconds.)
+    import fnmatch
+    import os
+    manifest_hits, entry_hits, sub_repos = [], [], set()
+    manifest_set = set(MANIFESTS)
+    prune = SKIP_DIRS | {".git"}
+    for dirpath, dirnames, filenames in os.walk(repo_root):
+        d = Path(dirpath)
+        if d != repo_root and (".git" in dirnames or ".git" in filenames):
+            sub_repos.add(d)
+            dirnames[:] = []      # never descend into an embedded repo
+            continue
+        dirnames[:] = [x for x in dirnames if x not in prune]
+        for fn in filenames:
+            if fn in manifest_set:
+                manifest_hits.append(d / fn)
+            if (fn in ENTRYPOINT_FILES
+                    or any(fnmatch.fnmatch(fn, g) for g in ENTRYPOINT_GLOBS)):
+                entry_hits.append(d / fn)
 
     def _in_sub_repo(p: Path) -> bool:
         for sr in sub_repos:
@@ -97,45 +147,119 @@ def discover_services(repo_root: Path):
                 pass
         return False
 
-    for mf in MANIFESTS:
-        for p in repo_root.rglob(mf):
-            # Only check path components INSIDE the repo — checking the full
-            # absolute path is wrong whenever the repo itself is checked out
-            # under a directory that happens to be named e.g. "tmp" (common
-            # in CI/sandboxes), which would wrongly skip every manifest.
-            rel_parts = p.relative_to(repo_root).parts
-            if any(part in SKIP_DIRS for part in rel_parts):
-                continue
-            if _in_sub_repo(p):
-                continue
-            parent = p.parent
-            # manifests living in meta dirs (.claude-plugin/plugin.json) name
-            # the directory ABOVE them
-            if parent.name in MANIFEST_DIR_ALIASES:
-                parent = parent.parent
-            rel = parent.relative_to(repo_root)
-            name = rel.name if str(rel) != "." else repo_root.name
+    def _excluded(rel_parts) -> bool:
+        # Only components INSIDE the repo are checked (a repo checked out
+        # under a dir literally named "tmp" must not be skipped wholesale).
+        return any(part in SKIP_DIRS or part in NON_SERVICE_DIRS
+                   for part in rel_parts)
+
+    def _add(name, rel, method):
+        """Register unless it collides with or nests into an earlier find."""
+        if not name or name in services:
+            return
+        for existing in services.values():
+            if rel == existing:
+                return
+            if existing != "." and (rel.startswith(existing + "/")
+                                    or existing.startswith(rel + "/")):
+                return  # no nested services across tiers (false-positive guard)
+        services[name] = rel
+        methods[name] = method
+
+    # Tier 1: manifests (ordered by MANIFESTS priority, then path)
+    order = {mf: i for i, mf in enumerate(MANIFESTS)}
+    for p in sorted(manifest_hits, key=lambda q: (order[q.name], str(q))):
+        rel_parts = p.relative_to(repo_root).parts
+        if _excluded(rel_parts[:-1]):
+            continue
+        parent = p.parent
+        # manifests living in meta dirs (.claude-plugin/plugin.json) name
+        # the directory ABOVE them
+        if parent.name in MANIFEST_DIR_ALIASES:
+            parent = parent.parent
+        rel = parent.relative_to(repo_root)
+        name = rel.name if str(rel) != "." else repo_root.name
+        if name not in services:          # tier-1 keeps original first-wins
             services[name] = str(rel)
+            methods[name] = "manifest"
+
+    # Tier 2: conventional layout parents
     for parent in SERVICE_PARENTS:
         d = repo_root / parent
         if d.is_dir():
             for child in d.iterdir():
                 if child.is_dir() and not child.name.startswith("."):
-                    services.setdefault(child.name, str(child.relative_to(repo_root)))
+                    _add(child.name, str(child.relative_to(repo_root)), "layout")
+
+    # Tier 3: entry-point files (works with no manifest at all)
+    for p in sorted(entry_hits):
+        rel_parts = p.relative_to(repo_root).parts
+        if (len(rel_parts) - 1) > MAX_ENTRYPOINT_DEPTH:
+            continue
+        if p.parent == repo_root:         # root entry-point == fallback case
+            continue
+        if _excluded(rel_parts[:-1]):
+            continue
+        # A dir that is (or lives inside) a Python package tree is a module
+        # of a larger application, not a standalone service — unless a
+        # container or proc definition says it deploys on its own.
+        if p.name not in ("Dockerfile", "Procfile"):
+            d, in_pkg = p.parent, False
+            while d != repo_root and d != d.parent:
+                if (d / "__init__.py").exists():
+                    in_pkg = True
+                    break
+                d = d.parent
+            if in_pkg:
+                continue
+        _add(p.parent.name, str(p.parent.relative_to(repo_root)), "entrypoint")
+
+    # Tier 4: docker-compose build contexts
+    for cf in COMPOSE_FILES:
+        f = repo_root / cf
+        if not f.is_file():
+            continue
+        try:
+            text = f.read_text(errors="ignore")
+        except OSError:
+            continue
+        for m in COMPOSE_CONTEXT.finditer(text):
+            d = (repo_root / m.group(1).strip("/")).resolve()
+            if (d.is_dir() and d != repo_root
+                    and repo_root in d.parents
+                    and not _excluded(d.relative_to(repo_root).parts)):
+                _add(d.name, str(d.relative_to(repo_root)), "compose")
+
+    # Tier 5: content dirs — only for repos where nothing else matched
+    if not services:
+        for child in sorted(repo_root.iterdir()):
+            if (not child.is_dir() or child.name.startswith(".")
+                    or child.name in SKIP_DIRS or child.name in NON_SERVICE_DIRS
+                    or child in sub_repos):
+                continue
+            n_files = sum(1 for q in child.rglob("*")
+                          if q.is_file() and not _excluded(
+                              q.relative_to(repo_root).parts[:-1]))
+            if n_files >= CONTENT_MIN_FILES:
+                _add(child.name, str(child.relative_to(repo_root)), "content")
+
     if not services:
         services[repo_root.name] = "."
-    return services
+        methods[repo_root.name] = "fallback"
+    return (services, methods) if with_methods else services
 
 
 def census(genome, repo_root: Path, repo_name: str):
-    services = discover_services(repo_root)
+    services, methods = discover_services(repo_root, with_methods=True)
     genome.upsert_node(f"repo:{repo_name}", "Repo", repo_name,
                        props={"path": str(repo_root)})
     for name, rel in services.items():
         langs = _langs(Path(repo_root) / rel)
         genome.upsert_node(f"svc:{name}", "Service", name,
-                           props={"dir": rel, "repo": repo_name, "languages": langs},
-                           provenance=[f"census:{repo_name}/{rel}"])
+                           props={"dir": rel, "repo": repo_name, "languages": langs,
+                                  "detected_by": methods.get(name, "manifest")},
+                           provenance=[f"census:{repo_name}/{rel} "
+                                       f"({methods.get(name, 'manifest')})"])
         genome.upsert_edge("PART_OF", f"svc:{name}", f"repo:{repo_name}")
     genome.commit()
     return services
