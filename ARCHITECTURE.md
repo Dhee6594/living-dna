@@ -40,6 +40,9 @@ These constrain every change. If a change violates one, it's wrong, not clever.
 ```
 dna/db.py          Genome: bitemporal store on SQLite. The only thing that touches the DB.
 dna/ingest.py      Write path. Passes 1-4: census -> structure -> history -> eras.
+dna/insights.py    Insight Engine: graph-only engineering intelligence — scores,
+                   hidden coupling, cycles, silos, SPOF, ranked recommendations,
+                   audience reports. Deterministic; every formula documented.
 dna/genome_ops.py  Read path. Profiles, bus factor, time travel, diff, ask, export, report.
 dna/ai.py          Optional LLM layer. Era packing, decision miner + verifier, deep answers.
 dna/server.py      JSON API + Genome Browser UI (stdlib http.server).
@@ -120,13 +123,28 @@ changed, it no-ops. That's why re-ingesting is safe and cheap.
 `ingest_repo` runs four passes in order. All git access is via `subprocess`
 (`_git` helper, which degrades to empty string on failure rather than crashing).
 
-**Pass 1 — Census (`census` / `discover_services`).** Walk the tree, find service
-candidates: any dir holding a manifest (`package.json`, `pyproject.toml`,
-`go.mod`, `requirements.txt`, `Cargo.toml`, `pom.xml`, `plugin.json`) or living
-under `services/ apps/ packages/`. Skips `SKIP_DIRS` (node_modules, vendor, etc.)
-and embedded sub-repos (dirs with their own `.git`). Falls back to "whole repo is
-one service" if nothing matches. Emits `Service` and `Repo` nodes + `PART_OF`
-edges.
+**Pass 1 — Census (`census` / `discover_services`).** Tiered detectors, most
+trusted first; later tiers never override or nest inside earlier findings:
+
+1. *manifest* — any dir holding `package.json`, `pyproject.toml`, `go.mod`,
+   `requirements.txt`, `Cargo.toml`, `pom.xml`, `plugin.json`
+2. *layout* — children of `services/ apps/ packages/`
+3. *entrypoint* — dirs with `Dockerfile`, `Procfile`, `main.py`, `app.py`,
+   `manage.py`, `wsgi.py`/`asgi.py`, `main.go`, `main.rs`, `server.js`,
+   `server.py`/`*_server.py` … (`ENTRYPOINT_FILES`/`ENTRYPOINT_GLOBS`, depth
+   ≤ `MAX_ENTRYPOINT_DEPTH`). Dirs inside a Python package tree (`__init__.py`
+   in dir or ancestors) are modules, not services — unless the trigger is a
+   container/proc file.
+4. *compose* — `docker-compose.*` `build:`/`context:` targets
+5. *content* — top-level dirs with ≥ `CONTENT_MIN_FILES` files, ONLY when
+   tiers 1–4 found nothing (content repos: `modes/`, `reports/` become genes)
+
+All tiers skip `SKIP_DIRS` (node_modules, vendor…), `NON_SERVICE_DIRS`
+(tests, docs, examples, docs_src…— this also stops example dirs *with*
+manifests registering as services), and embedded sub-repos (own `.git`).
+Falls back to "whole repo is one service". Emits `Service` and `Repo` nodes +
+`PART_OF` edges; each Service carries a `detected_by` prop naming its tier.
+Extending detection = appending a tier or a filename constant.
 
 **Pass 2 — Structure (`structure`).** Parse imports (`PY_IMPORT`, `JS_IMPORT`
 regexes), `package.json` deps, and our `dna-deps.txt` convention. Any import that

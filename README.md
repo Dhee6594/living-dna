@@ -24,7 +24,9 @@ python3 -m dna.cli timetravel --at 2024-06-01
 python3 -m dna.cli diff --from 2024-06-01 --to now
 
 # 4. Genome Browser UI
-python3 -m dna.cli serve            # → http://localhost:8077
+python3 -m dna.cli serve            # → http://127.0.0.1:8077 (loopback only by default;
+                                    #   the genome holds person-level data and has no auth —
+                                    #   pass --host 0.0.0.0 only to expose deliberately)
 ```
 
 Or point it at a **real repo**: `python3 -m dna.cli ingest ~/code/your-project`
