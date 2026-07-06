@@ -1,96 +1,121 @@
-# 🧬 living-dna — walking skeleton (v0)
+# 🧬 Living DNA
 
 **Your codebase remembers everything. Now it can tell you.**
 
-This is the runnable v0 of Living Software DNA: point it at any local git repo and get a
-queryable Software Genome — DNA profiles, architecture archaeology, bus-factor simulation,
-and time travel. **Zero dependencies** (Python 3.10+ stdlib only).
+Living DNA sequences a git repository into a queryable **Software Genome** — a
+bitemporal graph of services, people, knowledge, and decisions — then answers the
+three questions GitHub can't:
 
-## Quickstart (60 seconds)
+> **Who really knows this?** · **What breaks if they leave or if we change this?** · **Why was it built this way?**
+
+[![CI](https://github.com/Dhee6594/living-dna/actions/workflows/ci.yml/badge.svg)](https://github.com/Dhee6594/living-dna/actions/workflows/ci.yml)
+![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue)
+![Engine dependencies: zero](https://img.shields.io/badge/engine%20deps-zero-brightgreen)
+![License: BUSL-1.1](https://img.shields.io/badge/license-BUSL--1.1-lightgrey)
+
+The analysis engine is **pure Python stdlib** — no pip dependencies, no daemons, no
+cloud. One SQLite file holds your genome.
+
+## Five-minute demo
 
 ```bash
-# 1. generate the synthetic demo org (87 commits, 5 services, 4 engineers, 2.5 yrs history)
-python3 fixtures/make_fixture.py
-
-# 2. sequence it (passes 1-4: census → structure → history → eras → profiles)
-python3 -m dna.cli ingest fixtures/acme-shop
-
-# 3. explore
-python3 -m dna.cli profile payments
-python3 -m dna.cli ask "why does checkout depend on payments"
-python3 -m dna.cli ask "who knows payments"
-python3 -m dna.cli ask "what happens if Lena leaves"
-python3 -m dna.cli timetravel --at 2024-06-01
-python3 -m dna.cli diff --from 2024-06-01 --to now
-
-# 4. Genome Browser UI
-python3 -m dna.cli serve            # → http://127.0.0.1:8077 (loopback only by default;
-                                    #   the genome holds person-level data and has no auth —
-                                    #   pass --host 0.0.0.0 only to expose deliberately)
+git clone https://github.com/Dhee6594/living-dna && cd living-dna
+./scripts/demo.sh              # generates a demo org, sequences it, starts the browser
+# → open http://127.0.0.1:8077
 ```
 
-Or point it at a **real repo**: `python3 -m dna.cli ingest ~/code/your-project`
+Or point it at any repo you have locally:
 
-## What works today
-
-| Capability | Status |
-|---|---|
-| Census + structure passes (services, languages, dependency edges with provenance) | ✅ |
-| Full git history replay → canonical event log (append-only, idempotent) | ✅ |
-| Bitemporal graph (valid_from/valid_to + recorded_at on every fact) | ✅ |
-| Era detection (activity segmentation per service) | ✅ |
-| DNA profiles (born/cause, eras, deps, knowledge, derived risks) — materialized, fast reads | ✅ |
-| KNOWS weights + effective owners (entropy-based) + bus-factor simulation | ✅ |
-| Time travel + causal diff between any two dates | ✅ |
-| Graph-first archaeology Q&A with evidence (works with **no** LLM) | ✅ |
-| LLM layer: era packing, decision mining with citation verification, deep answers | ✅ (set `ANTHROPIC_API_KEY`) |
-| Web UI: genome map, time scrubber, gene cards, ask box, bus-factor heatmap | ✅ |
-
-## Architecture (v0 = the blueprint, miniaturized)
-
-```
-git history ──► canonical events ──► bitemporal mini-graph (SQLite)
-                                          │
-                     materialized DNA profiles (read path: zero inference)
-                                          │
-              CLI · JSON API · web UI · (optional) LLM miner with verifier
+```bash
+pip install -e .
+dna ingest ~/code/your-project        # seconds, even on large repos (--max-commits N to cap)
+dna insights                          # engineering-intelligence report, ranked actions
+dna serve                             # browse the genome at http://127.0.0.1:8077
 ```
 
-The four design laws from the blueprint, already enforced here:
-1. **Write-time understanding, read-time data path** — profiles/timetravel never call an LLM.
-2. **Append-only bitemporality** — updates close `valid_to`, never overwrite.
-3. **Evidence on everything** — every fact carries provenance; the miner drops uncited claims.
-4. **Graph-first answers** — the LLM deepens answers; it is never required for them.
+## What you get
 
-## Layout
+**Insight Engine** — findings you can't read off GitHub:
+
+- **Hidden coupling** — services that change together with *no declared dependency*
+  (on Prometheus: `mantine-ui ↔ prometheus` co-changed 84× undeclared)
+- **Bus factor** — departure simulations with knowledge lost, recovery time, succession pairings
+- **Knowledge silos & single points of failure** — who really owns what, with evidence
+- **Dependency cycles, architectural drift, volatility** — where the structure is eroding
+- **Ranked recommendations** — scored by impact · risk · confidence · effort, never generic
+- **Executive reports** — one paragraph each for CTO, EM, Staff Engineer, Platform team
+
+**Architecture archaeology** — evidence-cited Q&A:
+
+```bash
+dna ask "who knows payments"
+dna ask "why does checkout depend on payments"
+dna ask "what happens if Lena leaves"
+dna timetravel --at 2024-06-01        # the dependency graph as it was
+dna diff --from 2024-06-01            # what changed since, with causes
+```
+
+Every answer cites commits, edges, and provenance. Every score's formula is
+documented next to it — nothing is a black box, and **no LLM is required** for any
+of the above (an optional Anthropic API key enables decision mining and narrative
+answers via `dna mine` / `dna ask --deep`).
+
+## Web application
+
+Two UIs ship in the box:
+
+- **Genome Browser** (`dna serve`) — zero-dependency single-file UI, perfect for a quick look
+- **Intelligence webapp** (`webapp/`) — production Next.js app: interactive genome
+  graph, knowledge explorer, time travel, bus-factor simulations, risk and executive
+  dashboards, ⌘K search, dark/light
+
+```bash
+dna serve                 # terminal 1 — genome API
+cd webapp && npm install && npm run dev   # terminal 2 → http://localhost:3000
+```
+
+## How it works
 
 ```
-dna/db.py          bitemporal graph store (SQLite, stdlib)
-dna/ingest.py      passes 1-4: census, structure, history, eras
-dna/genome_ops.py  profiles, effective owners, bus factor, time travel, ask
-dna/ai.py          optional: era packer, decision miner + verifier, deep answers
-dna/server.py      JSON API + Genome Browser (http.server)
-dna/cli.py         the `dna` command
-fixtures/          synthetic demo organization generator
-tests/             end-to-end test (17 checks): python3 -m tests.test_skeleton
+git history ──► 4-pass ingest ──► bitemporal graph (SQLite) ──► DNA profiles
+                census · structure          nodes/edges carry         │
+                history · eras              valid_from/valid_to,      ▼
+                                            provenance, confidence   insights · ask · busfactor
+                                                                     timetravel · web UI · export
 ```
 
-## Next steps
+Facts are never overwritten — the genome closes a fact's validity and records its
+successor, so you can query the architecture *as it was known at any date*. The full
+schema is open: `dna export` dumps every node, edge, and event as JSON.
 
-See [BUILDING.md](BUILDING.md) — the step-by-step path from this skeleton to the
-Phase-1 MVP in the blueprint (`living-software-dna/14-implementation-roadmap.md`).
+See [ARCHITECTURE.md](ARCHITECTURE.md) for the deep dive and
+[docs/](docs/README.md) for guides, CLI/API reference, and ADRs.
 
-## Contributing & governance
+## Performance
 
-Contributions welcome — see [CONTRIBUTING.md](CONTRIBUTING.md) for the dev setup, the
-gitflow branching model (branch off `develop`), and the DCO sign-off. Project governance
-and the RFC/ADR process live in [GOVERNANCE.md](GOVERNANCE.md); security reporting in
-[SECURITY.md](SECURITY.md).
+Measured on this repo's test hardware (see [docs/reference/performance.md](docs/reference/performance.md)):
+
+| Repo | Commits ingested | Ingest time | Genome size | `dna insights` |
+|---|---|---|---|---|
+| demo fixture | 97 | < 1 s | < 1 MB | ~5 ms |
+| flask | full history | seconds | small | ~10 ms |
+| prometheus | 3,000 (capped) | ~4 s | ~40 MB | ~80 ms |
+
+## Project status
+
+**Release candidate.** The engine, insight engine, CLI, API, and both UIs are
+tested (97-check engine suite + typed, tested webapp). Not yet built: PR/issue
+connectors, incremental re-indexing, auth/multi-tenancy — see
+[docs/](docs/README.md) for the roadmap.
+
+## Contributing & security
+
+- [CONTRIBUTING.md](CONTRIBUTING.md) — dev setup, tests, PR flow (gitflow: PRs target `develop`)
+- [SECURITY.md](SECURITY.md) — reporting vulnerabilities
+- The server binds `127.0.0.1` by default: the genome contains person-level data
+  and v0 has no auth. Expose deliberately with `--host 0.0.0.0`.
 
 ## License
 
-Source-available under the **[Business Source License 1.1](LICENSE)**: the source is public
-and free to read, modify, and use non-production (and for any non-competing production use —
-see the Additional Use Grant). Each version converts to **Apache-2.0** on its Change Date
-(2029-07-04 for 0.1.0). For commercial/hosted use that competes with Living DNA, contact the
-licensor.
+[Business Source License 1.1](LICENSE) — source-available; free for production use
+except competing hosted offerings; converts to Apache-2.0 on 2029-07-04.

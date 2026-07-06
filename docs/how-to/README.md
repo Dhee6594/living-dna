@@ -1,6 +1,9 @@
 # How-To Guides
 
-Task-oriented recipes. Placeholder — to be filled in per surface:
+- **[Troubleshooting & FAQ](troubleshooting.md)** — install issues, wrong-looking
+  results, privacy questions, first-run friction
+
+Task-oriented recipes still to be written:
 
 - Ingest a large / messy real-world repo (`--max-commits`, renames, bots).
 - Run a bus-factor simulation and read the result.
