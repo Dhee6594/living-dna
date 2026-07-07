@@ -6,7 +6,7 @@
 
 Report privately via GitHub's
 [**Report a vulnerability**](https://github.com/Dhee6594/living-dna/security/advisories/new)
-(Security → Advisories), or email **vemireddysaidheeraj94@gmail.com** with subject
+(Security → Advisories), or email **livingsoftwaredna@gmail.com** with subject
 `SECURITY: living-dna`.
 
 Please include: affected version/commit, a description, reproduction steps, and impact.
