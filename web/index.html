@@ -41,6 +41,16 @@
 <header><h1>🧬 Living Software DNA</h1><span>Genome Browser — walking skeleton v0</span></header>
 <main>
   <div>
+    <div class="card"><h2>Connect a repository</h2>
+      <input id="repoUrl" style="width:100%" placeholder="owner/name or https://github.com/owner/name">
+      <div style="display:flex;gap:6px;margin-top:6px">
+        <input id="repoBranch" style="flex:1" placeholder="branch (optional)">
+        <input id="repoToken" style="flex:1" type="password" placeholder="token (private)">
+      </div>
+      <div style="margin-top:8px"><button onclick="connectRepo()">Connect &amp; build</button>
+        <span id="connectMsg" style="color:var(--grey);font-size:12px"></span></div>
+    </div>
+    <div class="card"><h2>Repositories</h2><div id="repos"></div></div>
     <div class="card"><h2>Ask the genome</h2>
       <input id="q" style="width:100%" placeholder="why does checkout depend on payments"
              onkeydown="if(event.key==='Enter')ask()">
@@ -58,6 +68,19 @@
     </div>
     <div class="card"><h2 id="ptitle">DNA profile</h2><div id="profile">
       <em style="color:var(--grey)">Select a service.</em></div></div>
+    <div class="card"><h2>PR impact — predict before merge</h2>
+      <div style="display:flex;gap:6px">
+        <input id="prRepo" style="width:120px" placeholder="repo">
+        <input id="prBase" style="flex:1" placeholder="base rev (e.g. HEAD~10, main)">
+        <button onclick="analyzePR()">Predict</button>
+      </div>
+      <div id="prOut"></div>
+    </div>
+    <div class="card"><h2>Timeline — architecture evolution
+      <span id="tlspan" style="float:right;color:var(--grey);font-weight:400"></span></h2>
+      <svg id="trend" width="100%" height="90" viewBox="0 0 800 90"></svg>
+      <div id="timeline" style="max-height:260px;overflow:auto"></div>
+    </div>
   </div>
 </main>
 <script>
@@ -130,7 +153,85 @@ async function ask(){
     (a.detail?`<pre>${JSON.stringify(a.detail,null,1)}</pre>`:'');
 }
 
-loadServices(); loadGraph(); loadBus();
+const POST = (u,b) => fetch(u,{method:'POST',headers:{'Content-Type':'application/json'},
+  body:JSON.stringify(b)}).then(r=>r.json());
+
+async function loadRepos(){
+  const rs = await J('/api/repos');
+  document.getElementById('repos').innerHTML = rs.length ? rs.map(r=>`
+    <div class="svc">
+      <b>${r.repo}</b> ${r.is_org?'<span class="pill">org</span>':''}
+      ${r.stars!=null?`<span class="pill">★ ${r.stars}</span>`:''}
+      <button style="float:right;padding:2px 8px" onclick="syncRepo('${r.repo}')">sync</button>
+      <small>${r.provider} · ${r.branch||'?'} · ${r.head_sha||''} ·
+        last synced ${r.last_synced_at||'—'}</small>
+      ${r.description?`<small>${r.description}</small>`:''}</div>`).join('')
+    : '<em style="color:var(--grey)">No repositories yet — connect one above.</em>';
+}
+async function connectRepo(){
+  const url=document.getElementById('repoUrl').value.trim();
+  if(!url) return;
+  const msg=document.getElementById('connectMsg'); msg.textContent='cloning + building…';
+  const body={url, branch:document.getElementById('repoBranch').value.trim()||undefined,
+              token:document.getElementById('repoToken').value.trim()||undefined};
+  const r = await POST('/api/connect', body);
+  msg.textContent = r.error ? ('error: '+r.error)
+    : `built ${r.repo}: ${r.commits} commits, ${r.people} people, ${r.services.length} services`;
+  document.getElementById('repoToken').value='';
+  loadRepos(); loadServices(); loadGraph(); loadBus(); loadTimeline();
+}
+async function syncRepo(name){
+  const msg=document.getElementById('connectMsg'); msg.textContent='syncing '+name+'…';
+  const r = await POST('/api/sync', {repo:name});
+  msg.textContent = r.error ? ('error: '+r.error)
+    : `${name}: +${r.new_commits==null?'?':r.new_commits} commits in ${r.elapsed_ms}ms`;
+  loadRepos(); loadServices(); loadGraph(); loadBus(); loadTimeline();
+}
+
+async function analyzePR(){
+  const repo=document.getElementById('prRepo').value.trim();
+  const base=document.getElementById('prBase').value.trim();
+  if(!repo||!base){document.getElementById('prOut').innerHTML=
+    '<div class="ev">enter a repo and a base revision</div>';return;}
+  const r = await POST('/api/pr', {repo, base});
+  if(r.error){document.getElementById('prOut').innerHTML=`<div class="ev">${r.error}</div>`;return;}
+  const rk=r.architectural_risk;
+  document.getElementById('prOut').innerHTML =
+    `<div style="margin-top:8px"><b>${r.files_analyzed} files</b> ·
+      risk <span class="risk">${rk.band} (${rk.score})</span></div>`+
+    `<div style="margin-top:6px"><b>Affected:</b> ${r.affected_services.map(a=>
+      `<span class="pill">${a.service} (fan-in ${a.fan_in}, ${a.commits_90d}/90d)</span>`).join('')||'—'}</div>`+
+    `<div style="margin-top:6px"><b>Suggested reviewers:</b> ${r.predicted_reviewers.map(x=>
+      `${x.person} (${(x.knowledge_score*100).toFixed(0)}%)`).join(' · ')||'—'}</div>`+
+    (r.hidden_dependency_impact.length?`<div class="ev">⚠ hidden coupling: `+
+      r.hidden_dependency_impact.map(h=>`${h.from}↔${h.with} (×${h.co_changes})`).join(', ')+`</div>`:'')+
+    (r.documentation_impact.length?`<div class="ev">📄 docs: `+
+      r.documentation_impact.map(d=>d.service).join(', ')+` likely need updates</div>`:'');
+}
+
+async function loadTimeline(){
+  const t = await J('/api/timeline');
+  if(t.error){document.getElementById('timeline').innerHTML=
+    `<em style="color:var(--grey)">${t.error}</em>`;return;}
+  document.getElementById('tlspan').textContent = t.span.from?`${t.span.from} → ${t.span.to}`:'';
+  const ICON={service_created:'🌱',dependency_added:'→',dependency_removed:'⊗',
+    era_started:'◷',ownership_shift:'⇄'};
+  document.getElementById('timeline').innerHTML = t.milestones.slice(-40).reverse().map(m=>
+    `<div class="ev">${ICON[m.type]||'•'} <b>${m.date}</b> ${m.service}: ${m.detail}</div>`).join('');
+  // risk-trend sparkline: concentration_index per month
+  const s=t.monthly_series; const svg=document.getElementById('trend');
+  if(!s.length){svg.innerHTML='';return;}
+  const W=800,H=90,pad=6, n=s.length, maxC=Math.max(...s.map(x=>x.commits),1);
+  const px=i=>pad+i*(W-2*pad)/Math.max(n-1,1);
+  const bars=s.map((x,i)=>{const h=(x.commits/maxC)*(H-30);
+    return `<rect x="${px(i)-2}" y="${H-20-h}" width="3" height="${h}" fill="#cfe0dc"/>`}).join('');
+  const line=s.map((x,i)=>`${px(i)},${20+(1-x.concentration_index)*(H-40)}`).join(' ');
+  svg.innerHTML = bars +
+    `<polyline points="${line}" fill="none" stroke="#8c3b50" stroke-width="1.5"/>`+
+    `<text x="6" y="12" fill="#5a6072">commits/mo (bars) · knowledge concentration risk (line)</text>`;
+}
+
+loadRepos(); loadServices(); loadGraph(); loadBus(); loadTimeline();
 </script>
 </body>
 </html>

@@ -328,26 +328,27 @@ def structure(genome, repo_root: Path, services: dict, history_ts=None):
 
 
 # ------------------------------------------------------------- Pass 3: history
-def history(genome, repo_root: Path, services: dict, repo_name: str,
-            max_commits: int = 0):
-    """Replay git history -> events, service attribution, KNOWS weights.
+def _collect_commits(repo_root, rev_range=None, max_commits: int = 0):
+    """Parse `git log` into commit dicts (each with a `files` list) + rename
+    records, with identity resolution applied. Shared by the full-history pass
+    and the incremental sync path (dna/continuous.py).
 
-    max_commits: if > 0, only replay the N most-recent commits (useful for
-    first-run on large repos like CPython/Linux kernel).
+    rev_range: e.g. 'abc123..HEAD' — replay only commits in that range
+               (the incremental case). None = full history.
+    max_commits: cap at N most-recent commits (first-run on huge repos).
     """
-    log_args = ["log", "--reverse", "--numstat", "-M",
-                "--format=__C__%H|%at|%an|%ae|%s"]
+    fmt = "--format=__C__%H|%at|%an|%ae|%s"
     if max_commits > 0:
-        # Take the N most-recent commits; --reverse shows oldest first in the
-        # slice so history ordering is still chronological within the window.
-        log_args = ["log", "--numstat", "-M",
-                    f"-{max_commits}",
-                    "--format=__C__%H|%at|%an|%ae|%s"]
+        # Take the N most-recent commits; ordering handled downstream.
+        log_args = ["log", "--numstat", "-M", f"-{max_commits}", fmt]
+    else:
+        log_args = ["log", "--reverse", "--numstat", "-M", fmt]
+    if rev_range:
+        log_args.append(rev_range)
     log = _git(repo_root, *log_args)
-    if not log:
-        return {"commits": 0, "people": 0, "services": [], "first_dep_ts": {},
-                "activity": {}}
     commits, cur, renames = [], None, []
+    if not log:
+        return commits, renames
     for line in log.splitlines():
         if line.startswith("__C__"):
             parts = line[5:].split("|", 4)
@@ -378,7 +379,6 @@ def history(genome, repo_root: Path, services: dict, repo_name: str,
                 cur["files"].append((path,
                                      0 if add == "-" else int(add),
                                      0 if dele == "-" else int(dele)))
-
     # Identity resolution v0: collapse duplicate git identities before any
     # knowledge attribution (see dna/identity.py for rules).
     from .identity import resolve_identities
@@ -387,7 +387,11 @@ def history(genome, repo_root: Path, services: dict, repo_name: str,
         hit = aliases.get(c["email"].lower())
         if hit:
             c["email"], c["author"] = hit[0], hit[1]
+    return commits, renames
 
+
+def svc_of_fn(services: dict):
+    """Return a path->service-name resolver (longest dir prefix wins)."""
     svc_dirs = sorted(services.items(), key=lambda kv: -len(kv[1]))
 
     def svc_of(path):
@@ -395,6 +399,23 @@ def history(genome, repo_root: Path, services: dict, repo_name: str,
             if rel == "." or path.startswith(rel.rstrip("/") + "/") or path == rel:
                 return name
         return None
+    return svc_of
+
+
+def history(genome, repo_root: Path, services: dict, repo_name: str,
+            max_commits: int = 0, rev_range=None):
+    """Replay git history -> events, service attribution, KNOWS weights.
+
+    max_commits: if > 0, only replay the N most-recent commits (useful for
+    first-run on large repos like CPython/Linux kernel).
+    rev_range: restrict to a commit range (incremental sync uses this).
+    """
+    commits, renames = _collect_commits(repo_root, rev_range=rev_range,
+                                        max_commits=max_commits)
+    if not commits:
+        return {"commits": 0, "people": 0, "services": [], "first_dep_ts": {},
+                "activity": {}}
+    svc_of = svc_of_fn(services)
 
     knows = defaultdict(float)          # (person, service) -> raw weight
     co_change = defaultdict(int)        # (svc_a, svc_b) -> co-commit count

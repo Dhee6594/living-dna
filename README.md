@@ -60,6 +60,27 @@ documented next to it — nothing is a black box, and **no LLM is required** for
 of the above (an optional Anthropic API key enables decision mining and narrative
 answers via `dna mine` / `dna ask --deep`).
 
+**Continuous intelligence** — connect a repo once, then keep it live:
+
+```bash
+dna connect pallets/flask                       # clone + build + store metadata (< 2 min)
+dna connect https://github.com/acme/api --token $GH_TOKEN --branch main   # private / org
+dna sync flask                                  # replay ONLY new commits (≈3× faster)
+dna sync --all                                  # refresh every connected repo
+dna repos                                        # connected repos + metadata
+
+dna pr --repo flask --base HEAD~20              # predict a PR's blast radius before merge
+dna timeline --repo flask                        # architecture evolution over time
+```
+
+Incremental sync replays only the new commits and rebuilds derived facts from the
+event log, so the result is **byte-identical to a full re-ingest** — no drift, no
+rebuild. `dna pr` predicts affected services, likely reviewers, an architectural-risk
+band, hidden-coupling and documentation impact. `dna timeline` reconstructs service
+births, dependency evolution, ownership shifts, and a monthly risk-trend series. All
+of it (plus <2-minute repo onboarding) is in the Genome Browser too. See
+[PHASE-4.md](PHASE-4.md).
+
 ## Web application
 
 Two UIs ship in the box:
@@ -77,11 +98,12 @@ cd webapp && npm install && npm run dev   # terminal 2 → http://localhost:3000
 ## How it works
 
 ```
-git history ──► 4-pass ingest ──► bitemporal graph (SQLite) ──► DNA profiles
-                census · structure          nodes/edges carry         │
-                history · eras              valid_from/valid_to,      ▼
-                                            provenance, confidence   insights · ask · busfactor
-                                                                     timetravel · web UI · export
+GitHub connector ─► 4-pass ingest ──► bitemporal graph (SQLite) ──► DNA profiles
+ clone · metadata    census · structure         nodes/edges carry         │
+        │            history · eras             valid_from/valid_to,      ▼
+ incremental sync ──► replay only new           provenance, confidence   insights · ask · busfactor
+ (event log = truth)  commits, rebuild                                    timetravel · pr · timeline
+                      from the log                                        web UI · export
 ```
 
 Facts are never overwritten — the genome closes a fact's validity and records its
@@ -101,12 +123,20 @@ Measured on this repo's test hardware (see [docs/reference/performance.md](docs/
 | flask | full history | seconds | small | ~10 ms |
 | prometheus | 3,000 (capped) | ~4 s | ~40 MB | ~80 ms |
 
+Incremental sync replays only new commits and stays byte-identical to a full re-ingest:
+
+| Repo | Full history | Initial build | Incremental sync | Speed-up | Accuracy |
+|---|---|---|---|---|---|
+| fastapi | 500 commits | 1.72 s | +80 → 0.58 s | ~3.0× | KNOWS `maxdiff 0.0` |
+| flask | 2,604 commits | 0.87 s | +104 → 0.31 s | ~2.8× | KNOWS `maxdiff 0.0` |
+
 ## Project status
 
-**Release candidate.** The engine, insight engine, CLI, API, and both UIs are
-tested (97-check engine suite + typed, tested webapp). Not yet built: PR/issue
-connectors, incremental re-indexing, auth/multi-tenancy — see
-[docs/](docs/README.md) for the roadmap.
+**Release candidate.** The engine, insight engine, GitHub connector, continuous
+(incremental) intelligence, PR prediction, timeline, CLI, API, and both UIs are
+tested — a **115-check suite** (97 engine + 18 Phase 4) plus a typed, tested webapp.
+Not yet built: PR *thread/review* ingestion, an MCP server, and auth/multi-tenancy —
+see [PHASE-4.md](PHASE-4.md) and [docs/](docs/README.md) for the roadmap.
 
 ## Contributing & security
 

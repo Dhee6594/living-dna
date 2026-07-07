@@ -76,6 +76,12 @@ def make_handler(db_path):
                 elif p == "/api/insights":
                     from . import insights as ins
                     self._json(ins.insights(g))
+                elif p == "/api/repos":
+                    from . import github_connector as ghc
+                    self._json(ghc.list_repos(g))
+                elif p == "/api/timeline":
+                    from . import timeline as tl
+                    self._json(tl.timeline(g, repo=qs.get("repo", [None])[0]))
                 elif p == "/api/search":
                     q = qs.get("q", [""])[0].lower()
                     if not q:
@@ -106,7 +112,47 @@ def make_handler(db_path):
             finally:
                 g.conn.close()
 
+        def do_POST(self):
+            g = Genome(db_path)
+            u = urllib.parse.urlparse(self.path)
+            length = int(self.headers.get("Content-Length", 0) or 0)
+            try:
+                body = json.loads(self.rfile.read(length) or b"{}")
+            except (ValueError, TypeError):
+                body = {}
+            workdir = str(Path(db_path).parent / "repos")
+            try:
+                if u.path == "/api/connect":
+                    from . import github_connector as ghc
+                    self._json(ghc.connect(
+                        g, body["url"], workdir, token=body.get("token"),
+                        branch=body.get("branch"), repo_name=body.get("name")))
+                elif u.path == "/api/sync":
+                    from . import github_connector as ghc
+                    self._json(ghc.sync_repo(g, body["repo"], token=body.get("token")))
+                elif u.path == "/api/pr":
+                    from . import pr_intel
+                    if body.get("files"):
+                        files = body["files"]
+                    else:
+                        meta = _repo_meta(g, body.get("repo"))
+                        files = (pr_intel.diff_files(meta["clone_path"], body["base"],
+                                                     body.get("head", "HEAD"))
+                                 if meta else [])
+                    self._json(pr_intel.analyze(g, files, repo=body.get("repo")))
+                else:
+                    self._json({"error": "not found"}, 404)
+            except Exception as exc:  # noqa: BLE001 — v0 surface
+                self._json({"error": str(exc)}, 500)
+            finally:
+                g.conn.close()
+
     return Handler
+
+
+def _repo_meta(g, name):
+    from . import github_connector as ghc
+    return ghc.repo_meta(g, name) if name else None
 
 
 def serve(db_path=".dna/genome.db", port=8077, host="127.0.0.1"):

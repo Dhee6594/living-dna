@@ -9,6 +9,11 @@
   dna mine <service> [--era N]            LLM decision mining over an era (needs API key)
   dna export [--out FILE]                 JSON dump of all nodes/edges/events (open schema)
   dna insights                            engineering-intelligence report (graph-only)
+  dna connect <url> [--token T] [--branch B] [--name N]   connect + clone + build a GitHub repo
+  dna sync [<repo>] [--all] [--token T]   incremental update (only new commits)
+  dna repos                               list connected repositories + metadata
+  dna pr [--repo N --base REV [--head REV]] | [--files ...]   PR impact prediction
+  dna timeline [--repo N]                 architecture evolution over time
   dna serve [--port 8077]                 Genome Browser web UI + JSON API
 """
 import argparse
@@ -45,6 +50,24 @@ def main(argv=None):
                         "use 0.0.0.0 to expose deliberately)")
     sub.add_parser("report")
     sub.add_parser("insights")
+
+    # --- Phase 4: GitHub connector & continuous intelligence ---------------
+    s = sub.add_parser("connect"); s.add_argument("url")
+    s.add_argument("--token", help="GitHub Personal Access Token (private/org repos)")
+    s.add_argument("--branch"); s.add_argument("--name", help="repo name override")
+    s.add_argument("--workdir", default=".dna/repos",
+                   help="where working clones are stored (default: %(default)s)")
+    s.add_argument("--max-commits", type=int, default=0, metavar="N")
+    s = sub.add_parser("sync"); s.add_argument("repo", nargs="?")
+    s.add_argument("--all", action="store_true", help="sync every connected repo")
+    s.add_argument("--token")
+    sub.add_parser("repos")
+    s = sub.add_parser("pr")
+    s.add_argument("--repo", help="connected repo name (uses its clone for the diff)")
+    s.add_argument("--base", help="base revision (e.g. main, a SHA)")
+    s.add_argument("--head", default="HEAD")
+    s.add_argument("--files", nargs="*", help="explicit changed-file list instead of a diff")
+    s = sub.add_parser("timeline"); s.add_argument("--repo")
 
     a = ap.parse_args(argv)
     g = Genome(a.db)
@@ -106,6 +129,39 @@ def main(argv=None):
     elif a.cmd == "insights":
         from . import insights as ins
         out = ins.insights(g)
+    elif a.cmd == "connect":
+        from . import github_connector as ghc
+        out = ghc.connect(g, a.url, a.workdir, token=a.token, branch=a.branch,
+                          repo_name=a.name, max_commits=a.max_commits)
+    elif a.cmd == "sync":
+        from . import github_connector as ghc
+        if a.all or not a.repo:
+            names = [r["repo"] for r in ghc.list_repos(g)]
+            out = {n: ghc.sync_repo(g, n, token=a.token) for n in names} \
+                if names else {"error": "no connected repos — run `dna connect` first"}
+        else:
+            out = ghc.sync_repo(g, a.repo, token=a.token)
+    elif a.cmd == "repos":
+        from . import github_connector as ghc
+        out = ghc.list_repos(g)
+    elif a.cmd == "pr":
+        from . import pr_intel
+        if a.files:
+            files = a.files
+        elif a.repo and a.base:
+            from . import github_connector as ghc
+            meta = ghc.repo_meta(g, a.repo)
+            if not meta:
+                out = {"error": f"repo '{a.repo}' not connected"}; files = None
+            else:
+                files = pr_intel.diff_files(meta["clone_path"], a.base, a.head)
+        else:
+            out = {"error": "pr needs --files ... OR --repo NAME --base REV"}; files = None
+        if files is not None:
+            out = pr_intel.analyze(g, files, repo=a.repo)
+    elif a.cmd == "timeline":
+        from . import timeline as tl
+        out = tl.timeline(g, repo=a.repo)
     elif a.cmd == "serve":
         serve(a.db, a.port, a.host); return
 

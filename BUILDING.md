@@ -23,12 +23,17 @@ Skeleton runs end-to-end: ingest → graph → profiles → bus factor → time 
 4. Add `ask --deep` write-back: verified new facts become Decision nodes (the §6.5.2 loop).
 5. **Demo:** "why does X exist" answered with cited commits on a repo you didn't write.
 
-## Weeks 5–7 — GitHub connector (beyond local git)
-1. New module `dna/connectors/github.py`: PRs, reviews, issues via REST (token), resumable
-   cursors, rate-budget courtesy (§8.3). PR threads are the decision-rich corpus.
-2. Map PR↔commits↔issues into the event log (`code.pr`, `work.ticket` kinds).
-3. KNOWS weights gain review + discussion components (§9.6 formula).
-4. **Demo:** archaeology answer citing a PR argument, not just commits.
+## Weeks 5–7 — GitHub connector (beyond local git) ✅ (Phase 4)
+Delivered: `dna/github_connector.py` (connect/clone/import a repo — public / PAT / org /
+branch — with metadata storage), `dna/continuous.py` (incremental ingestion + continuous
+refresh, byte-identical to a full re-ingest), `dna/pr_intel.py` (PR impact prediction), and
+`dna/timeline.py` (architecture evolution over time). CLI: `connect`, `sync`, `repos`, `pr`,
+`timeline`; UI: repo onboarding, sync, PR panel, timeline. 18-check `tests/test_phase4.py` +
+validation on flask/fastapi. See [PHASE-4.md](PHASE-4.md).
+
+Still open (deferred): PR **thread/review** ingestion via REST (`code.pr` events) and the
+KNOWS review-component (§9.6) — the connector currently maps commits + PR *file* impact; PR
+discussion mining lands with the archaeology-depth work.
 
 ## Weeks 8–10 — productize the read path
 1. Swap SQLite → Postgres behind the same `Genome` interface (keep SQLite for `dna` CLI mode).
