@@ -29,3 +29,6 @@ tmp/
 
 # Generated fixture copies (tests build their own in a tempdir)
 fixtures/acme-shop/
+
+# Claude Code local config (skills/agents) - not version-controlled
+.claude/
